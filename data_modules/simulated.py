@@ -26,7 +26,7 @@ class SimulateSinusoidal:
         Make singularity structure in a batch of signals
         x: batched signal (Batch size, signal length)
         """
-        t_sub = int(np.floor(self.length / 3))
+        t_sub = int(np.floor(self.length / 30))
         t = random.randint(0, self.length-t_sub)
         x[:, t:t+t_sub] += amplitude
         return x
@@ -39,7 +39,7 @@ class SimulateSinusoidal:
         t1 = random.randint(0, np.floor(self.length / 2))
         t2 = random.randint(np.ceil(self.length / 2), self.length)
         sig_t = np.arange(t1, t2)
-        x[:, sig_t] = self.damped_signal(sig_t, initial_amplitude, decay_rate, angular_frequency, init_phase_angle)
+        x[:, sig_t] += self.damped_signal(sig_t / t2, initial_amplitude, decay_rate, angular_frequency, init_phase_angle)
         return x
 
     @property

@@ -3,7 +3,7 @@ import numpy as np
 import SignalTransformData as st
 import matplotlib.pyplot as plt
 
-def debug_loader(plot=True, samples=1000, sig_length=1000):
+def debug_loader(plot=True, samples=1000, sig_length=10000):
 
     data_module = st.data_modules.simulated.SinusoidalDataModule(classes=2, 
                                                                  samples=samples,
@@ -34,7 +34,7 @@ def debug_loader(plot=True, samples=1000, sig_length=1000):
                     print(f"class {l}, color {color}")
 
                     signals_l = batch['feature'][batch['label'] == l, :]
-                    t = np.tile(np.arange(samples), (signals_l.shape[0], 1))
+                    t = np.tile(np.arange(sig_length), (signals_l.shape[0], 1))
                     
                     ax1.scatter(t, signals_l[:, 0, :], c=color, s=0.5, alpha=0.1)
                     ax2.scatter(t, signals_l[:, 1, :], c=color, s=0.5, alpha=0.1)
