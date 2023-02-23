@@ -21,34 +21,35 @@ class SimulateSinusoidal:
     def damped_signal(t, initial_amplitude, decay_rate, angular_frequency, init_phase_angle):
         return initial_amplitude * np.exp(-decay_rate * t) * np.cos(angular_frequency * t - init_phase_angle)
 
-    def make_singularity(self, x, amplitude=1):
+    @staticmethod
+    def make_singularity(x, t1, t2, amplitude=1):
         """
         Make singularity structure in a batch of signals
         x: batched signal (Batch size, signal length)
         """
-        t_sub = int(np.floor(self.length / 30))
-        t = random.randint(0, self.length-t_sub)
-        x[:, t:t+t_sub] += amplitude
+        x[:, t1:t2] += amplitude
         return x
 
-    def make_transient(self, x, initial_amplitude, decay_rate, angular_frequency, init_phase_angle):
+    def make_transient(self, x, initial_amplitude, decay_rate, angular_frequency, init_phase_angle, t1, t2):
         """
         Make a transient structure in a batch of signals
         x: batched signal (Batch size, signal length)
         """
-        t1 = random.randint(0, np.floor(self.length / 2))
-        t2 = random.randint(np.ceil(self.length / 2), self.length)
         sig_t = np.arange(t1, t2)
         x[:, sig_t] += self.damped_signal(sig_t / t2, initial_amplitude, decay_rate, angular_frequency, init_phase_angle)
         return x
 
     @property
     def frame(self):
+        # TODO: makes new frame every call
         # This is what is read into the loader
-        d = {'features': [self.signals[i, :] for i in range(self.n)], 'labels': self.labels}
+        d = {'features': [self.signals[i, :] for i in range(self.n)],
+             'labels': self.labels,
+             'sub_labels': self.sub_labels
+             }
         return pd.DataFrame(data=d)
 
-    def __init__(self, classes=2, samples=2000, channels=2, sig_length=100):
+    def __init__(self, classes=2, samples=2000, channels=2, sig_length=100, save_to_file=None):
 
         self.classes = classes
         self.n = samples
@@ -58,38 +59,49 @@ class SimulateSinusoidal:
 
         # And randomly assign each sample to a different class with equal probability
         self.labels = np.random.choice([i for i in range(classes)], size=self.n, p=[1./classes for _ in range(classes)])
-
+        self.sub_labels = np.random.choice([i for i in range(4)], size=self.n, p=[1./4 for _ in range(4)])
         self.signals = np.zeros((self.n, self.channels, self.length))
-        for c in range(self.classes):
-            mask_class = np.ma.getmask(np.ma.masked_equal(self.labels, c))
+
+        # Shared parameters (a class will take a random choice from this set)
+        num_shared = 5
+        # base signal
+        base_af_shared = np.random.normal(5.5, 2, num_shared)
+        # singularity
+        singularity_width = int(np.floor(self.length / 40))
+        singularity_t1 = [random.randint(0, self.length - singularity_width) for _ in range(num_shared)]
+
+        for cls in range(self.classes):
+
+            # base signal parameters
+            base_angular_freq = [np.max((2.5, np.random.choice(base_af_shared))) * np.pi for _ in range(self.channels)]
+            base_amplitude = [np.max((0.5, np.random.normal(1, 0.3, 1))) for _ in range(self.channels)]
+            base_init_phase_angle = 0
+
+            # singularity parameters
+            s_t1 = np.random.choice(singularity_t1)
+            s_t2 = s_t1 + singularity_width
+            s_amplitude = [np.max((0.2, np.random.normal(1, 0.3, 1))) for _ in range(self.channels)]
+
+            mask = (np.ma.getmask(np.ma.masked_equal(self.labels, cls))) #& \
+                       # (np.ma.getmask(np.ma.masked_equal(self.sub_labels, sub_cls)))
 
             # Add base signal
-            angular_freq = np.max((4, np.random.normal(5.5, 0.4, 1))) * np.pi
             for channel in range(self.channels):
-                amplitude = np.max((0.2, np.random.normal(1, 0.3, 1)))
-                init_phase_angle = np.max((np.pi, np.random.normal(2*np.pi, 0.2, 1)))
-                self.signals[mask_class, channel, :] = \
-                    amplitude * np.cos((angular_freq * self.t / self.length) - init_phase_angle)
-
-            # Add transient signal
-            init_phase_angle = 0
-            angular_freq = np.max((4, np.random.normal(5.5, 0.4, 1))) * np.pi
-            for channel in range(self.channels):
-                amplitude = np.max((0.2, np.random.normal(1, 0.3, 1)))
-                decay_rate = np.max((0.3, np.random.normal(0.5, 0.1)))
-                self.signals[mask_class, channel, :] = self.make_transient(self.signals[mask_class, channel, :],
-                                                                           amplitude,
-                                                                           decay_rate,
-                                                                           angular_freq,
-                                                                           init_phase_angle)
+                self.signals[mask, channel, :] = \
+                    base_amplitude[channel] * np.cos((base_angular_freq[channel] * self.t / self.length)
+                                                     - base_init_phase_angle)
 
             # Add singularity signal
             for channel in range(self.channels):
-                amplitude = np.max((0.2, np.random.normal(1, 0.3, 1)))
-                self.signals[mask_class, channel, :] = self.make_singularity(self.signals[mask_class, channel, :],
-                                                                             amplitude=amplitude)
+                self.signals[mask, channel, :] = self.make_singularity(self.signals[mask, channel, :],
+                                                                       s_t1, s_t2,
+                                                                       amplitude=s_amplitude[channel])
 
-        self.signals += np.random.normal(0, 0.05, self.signals.shape)
+            if save_to_file is not None:
+                # save data to file for benchmarking on same seed
+                self.frame.to_csv(save_to_file, index=False)
+
+        self.signals += np.random.normal(0, 0.2, self.signals.shape)
 
     def __str__(self):
         s = "SimulateSinusoidal class summary\n==========================="
@@ -104,7 +116,7 @@ class SinusoidalDataModule(SimulateSinusoidal, pl.LightningDataModule, ABC):
     def num_cancer_types(self):
         return len(self.label_encoder.classes_)
 
-    def __init__(self, classes=2, samples=1000, channels=2, sig_length=100, batch_size=128):
+    def __init__(self, classes=2, samples=1000, channels=2, sig_length=100, batch_size=128, save_to_file=None):
         """
         @param steps:               Number of steps to Markov Chain
         @param classes:             Number of different Markov Chains
@@ -120,7 +132,8 @@ class SinusoidalDataModule(SimulateSinusoidal, pl.LightningDataModule, ABC):
         self.training_set, self.test_set, self.validation_set = None, None, None
 
         # Define simulated set, and run process forward
-        SimulateSinusoidal.__init__(self, classes=classes, samples=samples, channels=channels, sig_length=sig_length)
+        SimulateSinusoidal.__init__(self, classes=classes, samples=samples, channels=channels, sig_length=sig_length,
+                                    save_to_file=save_to_file)
 
         _df = self.frame
 
@@ -188,7 +201,11 @@ class SinusoidalDataset(Dataset):
         # Get label
         label = self.data_frame.loc[self.data_frame.index[idx], ['labels']][0]
         label_enc = list(self.label_encoder.classes_).index(label)
+        # Get sub-label
+        sub_label = self.data_frame.loc[self.data_frame.index[idx], ['sub_labels']][0]
 
         batch = {"feature": torch.tensor(feature, dtype=torch.float),
-                 "label": torch.tensor(label_enc)}
+                 "label": torch.tensor(label_enc),
+                 # "sub_label": torch.tensor(sub_label)
+                 }
         return batch
